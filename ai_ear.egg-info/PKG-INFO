@@ -1,3 +1,43 @@
+Metadata-Version: 2.4
+Name: ai-ear
+Version: 0.1.0
+Summary: Enterprise-grade multi-modal AI audio listening and understanding system
+License: MIT
+Keywords: ai,audio,speech,nlp,enterprise,real-time
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Multimedia :: Sound/Audio :: Analysis
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: sounddevice>=0.4.6
+Requires-Dist: soundfile>=0.12.1
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: librosa>=0.10.1
+Requires-Dist: openai-whisper>=20231117
+Requires-Dist: transformers>=4.38.0
+Requires-Dist: torch>=2.2.0
+Requires-Dist: torchaudio>=2.2.0
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn[standard]>=0.27.0
+Requires-Dist: websockets>=12.0
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: pydantic>=2.6.0
+Requires-Dist: pydantic-settings>=2.2.0
+Requires-Dist: structlog>=24.1.0
+Requires-Dist: rich>=13.7.0
+Requires-Dist: httpx>=0.27.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.1.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.5; extra == "dev"
+Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
+Requires-Dist: pytest-mock>=3.12.0; extra == "dev"
+Requires-Dist: ruff>=0.3.0; extra == "dev"
+Requires-Dist: mypy>=1.9.0; extra == "dev"
+
 # 🎧 The AI Ear
 
 > *"Hear beyond words."*
