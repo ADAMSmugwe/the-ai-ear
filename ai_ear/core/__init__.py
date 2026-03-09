@@ -1,19 +1,19 @@
 """Core subpackage: listener, pipeline, memory, models, config."""
 
+from ai_ear.core.config import Settings
 from ai_ear.core.listener import AudioListener
-from ai_ear.core.pipeline import AudioPipeline
 from ai_ear.core.memory import AuralMemory
 from ai_ear.core.models import (
-    AudioChunk,
     AnalysisResult,
-    SpeechSegment,
+    AudioChunk,
+    AuralEvent,
+    AuralEventType,
     EmotionProfile,
     EnvironmentSnapshot,
     MusicProfile,
-    AuralEvent,
-    AuralEventType,
+    SpeechSegment,
 )
-from ai_ear.core.config import Settings
+from ai_ear.core.pipeline import AudioPipeline
 
 __all__ = [
     "AudioListener",

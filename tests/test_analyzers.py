@@ -4,8 +4,6 @@ Tests for the environment and music analysers using synthetic audio.
 
 from __future__ import annotations
 
-import asyncio
-
 import numpy as np
 import pytest
 
@@ -128,3 +126,38 @@ class TestMusicAnalyzer:
         g_major[7] = 3.0
         key = _estimate_key(g_major)
         assert key == "G major"
+
+
+# ---------------------------------------------------------------------------
+# Analyser restart (stop → start → analyse should work)
+# ---------------------------------------------------------------------------
+
+class TestAnalyserRestart:
+    @pytest.mark.asyncio
+    async def test_environment_analyser_restarts(self):
+        analyzer = EnvironmentAnalyzer(sample_rate=SR)
+        await analyzer.load()
+        tone = generate_tone(440.0, 2.0, SR)
+        result1 = await analyzer.analyse(_chunk(tone))
+        assert result1.confidence >= 0.0
+
+        await analyzer.unload()
+
+        # load() must recreate the executor so analyse() works again
+        await analyzer.load()
+        result2 = await analyzer.analyse(_chunk(tone))
+        assert result2.confidence >= 0.0
+
+    @pytest.mark.asyncio
+    async def test_music_analyser_restarts(self):
+        analyzer = MusicAnalyzer(sample_rate=SR)
+        await analyzer.load()
+        tone = generate_tone(440.0, 2.0, SR)
+        result1 = await analyzer.analyse(_chunk(tone))
+        assert result1.profile is not None
+
+        await analyzer.unload()
+
+        await analyzer.load()
+        result2 = await analyzer.analyse(_chunk(tone))
+        assert result2.profile is not None

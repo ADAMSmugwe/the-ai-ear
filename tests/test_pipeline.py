@@ -6,9 +6,6 @@ We use mock analysers to keep the tests fast and deterministic.
 
 from __future__ import annotations
 
-import asyncio
-import time
-
 import numpy as np
 import pytest
 
@@ -314,3 +311,112 @@ class TestDeriveTags:
         tags = _derive_tags(r)
         assert "contains_music" in tags
         assert "fast_tempo" in tags
+
+
+# ---------------------------------------------------------------------------
+# Per-source-id event isolation
+# ---------------------------------------------------------------------------
+
+class TestPerSourceEventIsolation:
+    @pytest.mark.asyncio
+    async def test_two_sources_have_independent_state(self):
+        """Events for source B must not depend on source A's prior state."""
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        pipeline = AudioPipeline(analyzers=[MockEnvironmentAnalyzer(EnvironmentLabel.SPEECH)])
+        pipeline.on_event(on_event)
+        await pipeline.start()
+
+        # Process source A — sets its env to SPEECH
+        chunk_a = AudioChunk(
+            samples=np.zeros(SR * 2, dtype=np.float32),
+            sample_rate=SR,
+            source_id="source_a",
+        )
+        await pipeline.process(chunk_a)
+
+        # Process source B — should also get ENVIRONMENT_CHANGE (not suppressed by A)
+        chunk_b = AudioChunk(
+            samples=np.zeros(SR * 2, dtype=np.float32),
+            sample_rate=SR,
+            source_id="source_b",
+        )
+        await pipeline.process(chunk_b)
+
+        env_a = [e for e in events if e.event_type == AuralEventType.ENVIRONMENT_CHANGE
+                 and e.source_id == "source_a"]
+        env_b = [e for e in events if e.event_type == AuralEventType.ENVIRONMENT_CHANGE
+                 and e.source_id == "source_b"]
+
+        assert len(env_a) == 1
+        assert len(env_b) == 1  # B must see its own transition, not be silenced by A's state
+        await pipeline.stop()
+
+
+# ---------------------------------------------------------------------------
+# Callback unsubscription
+# ---------------------------------------------------------------------------
+
+class TestCallbackUnsubscription:
+    @pytest.mark.asyncio
+    async def test_on_result_returns_unsubscribe(self):
+        received = []
+
+        async def callback(result):
+            received.append(result)
+
+        pipeline = AudioPipeline(analyzers=[MockSpeechAnalyzer()])
+        await pipeline.start()
+
+        unsubscribe = pipeline.on_result(callback)
+        await pipeline.process(_make_chunk())
+        assert len(received) == 1
+
+        # Unsubscribe and verify no more callbacks
+        unsubscribe()
+        await pipeline.process(_make_chunk())
+        assert len(received) == 1  # still 1 — callback was removed
+        await pipeline.stop()
+
+    @pytest.mark.asyncio
+    async def test_on_event_returns_unsubscribe(self):
+        received = []
+
+        async def callback(event):
+            received.append(event)
+
+        pipeline = AudioPipeline(analyzers=[MockEnvironmentAnalyzer(EnvironmentLabel.SPEECH)])
+        await pipeline.start()
+
+        unsubscribe = pipeline.on_event(callback)
+        await pipeline.process(_make_chunk())
+        count_after_first = len(received)
+
+        unsubscribe()
+        await pipeline.process(_make_chunk())
+        assert len(received) == count_after_first  # no new events after unsubscribe
+        await pipeline.stop()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline restart (executor recreation)
+# ---------------------------------------------------------------------------
+
+class TestPipelineRestart:
+    @pytest.mark.asyncio
+    async def test_start_stop_start_works(self):
+        """Pipeline should be reusable after stop() / start()."""
+        pipeline = AudioPipeline(analyzers=[MockSpeechAnalyzer("first")])
+        await pipeline.start()
+        result1 = await pipeline.process(_make_chunk())
+        assert result1.speech.text == "first"
+        await pipeline.stop()
+
+        # Restart
+        await pipeline.start()
+        result2 = await pipeline.process(_make_chunk())
+        assert result2.speech.text == "first"
+        await pipeline.stop()

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -98,9 +97,14 @@ class EmotionAnalyzer(BaseAnalyzer):
         self._device = device
         self._sample_rate = sample_rate
         self._pipeline: object | None = None
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="emotion")
+        self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="emotion"
+        )
 
     async def load(self) -> None:
+        # Recreate the executor if it was previously shut down.
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="emotion")
         log.info("Loading emotion model '%s'…", self._model_id)
         loop = asyncio.get_running_loop()
         self._pipeline = await loop.run_in_executor(self._executor, self._load_sync)
@@ -121,7 +125,9 @@ class EmotionAnalyzer(BaseAnalyzer):
 
     async def unload(self) -> None:
         self._pipeline = None
-        self._executor.shutdown(wait=False)
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
 
     async def analyse(self, chunk: AudioChunk) -> EmotionResult:
         if self._pipeline is None:
@@ -129,6 +135,9 @@ class EmotionAnalyzer(BaseAnalyzer):
                 profile=EmotionProfile(dominant=EmotionLabel.NEUTRAL),
                 confidence=0.0,
             )
+        # Recreate executor if unload() was called previously.
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="emotion")
         loop = asyncio.get_running_loop()
         profile = await loop.run_in_executor(
             self._executor, self._predict_sync, chunk.samples, chunk.sample_rate

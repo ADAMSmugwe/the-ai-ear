@@ -75,8 +75,9 @@ class SpeechAnalyzer(BaseAnalyzer):
             return None
 
     async def unload(self) -> None:
+        # Release the loaded model but keep the executor alive so this
+        # analyzer instance can be safely reused with future load()/analyse() calls.
         self._model = None
-        self._executor.shutdown(wait=False)
 
     async def analyse(self, chunk: AudioChunk) -> SpeechResult:
         if self._model is None:
@@ -90,9 +91,6 @@ class SpeechAnalyzer(BaseAnalyzer):
 
     def _transcribe_sync(self, samples: np.ndarray, sample_rate: int) -> SpeechSegment:
         try:
-            import whisper  # type: ignore[import-untyped]
-
-            # Whisper expects float32 mono at 16 kHz
             audio = samples.astype(np.float32)
             if sample_rate != 16_000:
                 try:

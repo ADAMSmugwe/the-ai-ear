@@ -6,18 +6,18 @@ woven together into a continuous, memory-backed semantic stream.
 """
 
 from ai_ear.core.listener import AudioListener
-from ai_ear.core.pipeline import AudioPipeline
 from ai_ear.core.memory import AuralMemory
 from ai_ear.core.models import (
-    AudioChunk,
     AnalysisResult,
-    SpeechSegment,
+    AudioChunk,
+    AuralEvent,
+    AuralEventType,
     EmotionProfile,
     EnvironmentSnapshot,
     MusicProfile,
-    AuralEvent,
-    AuralEventType,
+    SpeechSegment,
 )
+from ai_ear.core.pipeline import AudioPipeline
 
 __version__ = "0.1.0"
 __all__ = [

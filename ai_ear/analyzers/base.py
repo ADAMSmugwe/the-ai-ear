@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from pydantic import BaseModel, Field
+
 from ai_ear.core.models import (
     AudioChunk,
     EmotionProfile,
@@ -21,8 +23,6 @@ from ai_ear.core.models import (
     MusicProfile,
     SpeechSegment,
 )
-from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # Typed partial results

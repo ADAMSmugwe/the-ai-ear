@@ -2,7 +2,6 @@
 Tests for ai_ear.core.memory — AuralMemory temporal context.
 """
 
-import asyncio
 import time
 
 import pytest
@@ -14,8 +13,6 @@ from ai_ear.core.models import (
     AuralEventType,
     EmotionLabel,
     EmotionProfile,
-    EnvironmentLabel,
-    EnvironmentSnapshot,
     MusicProfile,
     SpeechSegment,
 )

@@ -15,12 +15,11 @@ GET  /pipeline/stats           — pipeline throughput statistics
 
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import numpy as np
@@ -38,7 +37,7 @@ from pydantic import BaseModel
 
 from ai_ear.core.config import Settings
 from ai_ear.core.memory import AuralMemory
-from ai_ear.core.models import AnalysisResult, AuralEvent
+from ai_ear.core.models import AnalysisResult, AudioChunk
 from ai_ear.core.pipeline import AudioPipeline
 
 log = logging.getLogger(__name__)
@@ -174,7 +173,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if chunk is None:
             raise HTTPException(status_code=422, detail="Could not decode audio file")
 
-        from ai_ear.core.models import AudioChunk
         result = await pipeline.process(chunk)
         return result
 
@@ -208,8 +206,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if event_type:
             try:
                 et = AuralEventType(event_type)
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Unknown event_type '{event_type}'")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Unknown event_type '{event_type}'") from exc
         evts = memory.recent_events(last_n=last_n, event_type=et)
         return {"events": [e.model_dump() for e in evts], "count": len(evts)}
 
@@ -248,12 +246,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sample_rate = settings.audio_sample_rate
 
         async def _dispatch(result: AnalysisResult) -> None:
-            try:
+            with suppress(Exception):
                 await websocket.send_json(result.model_dump())
-            except Exception:
-                pass
 
-        pipeline.on_result(_dispatch)
+        # Register and capture the unsubscribe callable so we can clean up on disconnect.
+        unsubscribe = pipeline.on_result(_dispatch)
 
         try:
             while True:
@@ -265,18 +262,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     window = buffer[:chunk_frames]
                     buffer = buffer[chunk_frames:]
 
-                    from ai_ear.core.models import AudioChunk
                     chunk = AudioChunk(
                         samples=window,
                         sample_rate=sample_rate,
                         source_id=source_id,
                     )
-                    asyncio.create_task(pipeline.process(chunk))
+                    # Await directly to avoid unbounded task accumulation.
+                    await pipeline.process(chunk)
         except WebSocketDisconnect:
             log.info("WebSocket client disconnected: %s", source_id)
         except Exception:
             log.exception("WebSocket error for %s", source_id)
         finally:
+            # Always unregister the per-connection callback to prevent leaks.
+            unsubscribe()
             await websocket.close()
 
     return app
@@ -287,10 +286,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 # ---------------------------------------------------------------------------
 
 def _build_analyzers(settings: Settings) -> list:
-    from ai_ear.analyzers.speech import SpeechAnalyzer
     from ai_ear.analyzers.emotion import EmotionAnalyzer
     from ai_ear.analyzers.environment import EnvironmentAnalyzer
     from ai_ear.analyzers.music import MusicAnalyzer
+    from ai_ear.analyzers.speech import SpeechAnalyzer
 
     analyzers: list = [
         EnvironmentAnalyzer(
@@ -326,7 +325,7 @@ def _build_analyzers(settings: Settings) -> list:
 
 def _load_audio_bytes(
     data: bytes, target_sr: int, source_id: str = "upload"
-) -> "AudioChunk | None":  # type: ignore[name-defined]
+) -> AudioChunk | None:
     """Decode raw audio bytes into an AudioChunk using soundfile."""
     try:
         import soundfile as sf  # type: ignore[import-untyped]
@@ -334,16 +333,22 @@ def _load_audio_bytes(
         buf = io.BytesIO(data)
         audio, sr = sf.read(buf, dtype="float32", always_2d=True)
         mono = audio.mean(axis=1)
+        effective_sr = sr
 
         if sr != target_sr:
             try:
                 import librosa  # type: ignore[import-untyped]
                 mono = librosa.resample(mono, orig_sr=sr, target_sr=target_sr)
+                effective_sr = target_sr
             except ImportError:
-                pass  # best-effort
+                log.warning(
+                    "librosa is not installed; returning audio at original sample rate %d "
+                    "instead of requested %d",
+                    sr,
+                    target_sr,
+                )
 
-        from ai_ear.core.models import AudioChunk
-        return AudioChunk(samples=mono, sample_rate=target_sr, source_id=source_id)
+        return AudioChunk(samples=mono, sample_rate=effective_sr, source_id=source_id)
     except Exception:
         log.exception("Failed to decode audio bytes")
         return None

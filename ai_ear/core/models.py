@@ -14,7 +14,6 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-
 # ---------------------------------------------------------------------------
 # Low-level audio chunk
 # ---------------------------------------------------------------------------
@@ -31,7 +30,7 @@ class AudioChunk(BaseModel):
     duration_s: float = Field(default=0.0, description="Duration in seconds (computed)")
 
     @model_validator(mode="after")
-    def _compute_duration(self) -> "AudioChunk":
+    def _compute_duration(self) -> AudioChunk:
         n = self.samples.shape[0]
         object.__setattr__(self, "duration_s", n / self.sample_rate)
         return self

@@ -20,7 +20,6 @@ from ai_ear.core.models import (
     SpeechSegment,
 )
 
-
 SR = 16_000
 
 

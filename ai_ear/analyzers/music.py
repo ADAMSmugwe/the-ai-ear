@@ -57,10 +57,15 @@ class MusicAnalyzer(BaseAnalyzer):
     ) -> None:
         self._sample_rate = sample_rate
         self._energy_threshold = energy_threshold
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="music")
+        self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="music"
+        )
         self._librosa_available = False
 
     async def load(self) -> None:
+        # Recreate the executor if it was previously shut down.
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="music")
         try:
             import librosa  # noqa: F401  # type: ignore[import-untyped]
             self._librosa_available = True
@@ -69,9 +74,14 @@ class MusicAnalyzer(BaseAnalyzer):
             log.warning("librosa not installed – music analysis will be limited")
 
     async def unload(self) -> None:
-        self._executor.shutdown(wait=False)
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
 
     async def analyse(self, chunk: AudioChunk) -> MusicResult:
+        # Recreate executor if unload() was called previously.
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="music")
         loop = asyncio.get_running_loop()
         profile = await loop.run_in_executor(
             self._executor, self._analyse_sync, chunk.samples, chunk.sample_rate

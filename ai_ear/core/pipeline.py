@@ -13,8 +13,8 @@ Key design decisions
 * **Concurrent by default** – all analysers run in parallel via
   ``asyncio.gather``, so a slow model does not block faster ones.
 * **Pluggable analysers** – add any :class:`BaseAnalyzer` at construction time.
-* **Back-pressure aware** – if the result queue fills up, older results are
-  silently dropped rather than blocking the audio thread.
+* **Concurrency-limited** – an internal semaphore caps the number of in-flight
+  analyses, naturally applying back-pressure without unbounded queuing.
 * **Observable** – every fused result is broadcast to registered callbacks,
   enabling zero-copy fan-out to WebSocket clients, loggers, etc.
 """
@@ -25,8 +25,8 @@ import asyncio
 import hashlib
 import logging
 import time
-import uuid
 from collections.abc import Callable, Coroutine
+from contextlib import suppress
 from typing import Any
 
 from ai_ear.core.models import (
@@ -35,8 +35,6 @@ from ai_ear.core.models import (
     AuralEvent,
     AuralEventType,
     EnvironmentLabel,
-    MusicProfile,
-    SpeechSegment,
 )
 
 log = logging.getLogger(__name__)
@@ -80,30 +78,67 @@ class AudioPipeline:
         self._running = False
         self._stats = _PipelineStats()
 
-        # State tracked for event generation
-        self._prev_env: EnvironmentLabel | None = None
-        self._prev_music_active: bool = False
-        self._prev_speech_active: bool = False
+        # Per-source-id state for event generation (avoids cross-talk between sources)
+        self._prev_env_by_source: dict[str, EnvironmentLabel | None] = {}
+        self._prev_music_active_by_source: dict[str, bool] = {}
+        self._prev_speech_active_by_source: dict[str, bool] = {}
 
     # ------------------------------------------------------------------
     # Analyser registration
     # ------------------------------------------------------------------
 
     def add_analyzer(self, analyzer: Any) -> None:
-        """Register an additional analyser at runtime."""
+        """
+        Register an additional analyser at runtime.
+
+        If the pipeline is already running, the analyser's ``load()`` coroutine
+        is scheduled as a background task so it is initialised before being
+        used for analysis.  If no event loop is running, the caller is
+        responsible for awaiting ``analyzer.load()`` before the analyser is
+        used.
+        """
         self._analyzers.append(analyzer)
+        if self._running:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(analyzer.load())
+            except RuntimeError:
+                log.warning(
+                    "add_analyzer() called while running but no event loop is "
+                    "active; analyzer.load() will not be called automatically"
+                )
 
     # ------------------------------------------------------------------
     # Callback registration (fan-out subscribers)
     # ------------------------------------------------------------------
 
-    def on_result(self, callback: ResultCallback) -> None:
-        """Register an async callback invoked for every AnalysisResult."""
+    def on_result(self, callback: ResultCallback) -> Callable[[], None]:
+        """
+        Register an async callback invoked for every AnalysisResult.
+
+        Returns a callable that, when called, unregisters the callback.
+        """
         self._result_callbacks.append(callback)
 
-    def on_event(self, callback: EventCallback) -> None:
-        """Register an async callback invoked for every AuralEvent."""
+        def _unsubscribe() -> None:
+            with suppress(ValueError):
+                self._result_callbacks.remove(callback)
+
+        return _unsubscribe
+
+    def on_event(self, callback: EventCallback) -> Callable[[], None]:
+        """
+        Register an async callback invoked for every AuralEvent.
+
+        Returns a callable that, when called, unregisters the callback.
+        """
         self._event_callbacks.append(callback)
+
+        def _unsubscribe() -> None:
+            with suppress(ValueError):
+                self._event_callbacks.remove(callback)
+
+        return _unsubscribe
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -145,13 +180,15 @@ class AudioPipeline:
         """
         Consume an async-iterable of :class:`AudioChunk` objects indefinitely.
 
-        This is the primary entry-point for continuous listening.
+        This is the primary entry-point for continuous listening.  Each chunk
+        is awaited in sequence; the semaphore inside :meth:`process` caps the
+        number of analyses that may overlap.
         """
         self._running = True
         async for chunk in chunks:
             if not self._running:
                 break
-            asyncio.create_task(self._process_and_dispatch(chunk))
+            await self._process_and_dispatch(chunk)
 
     # ------------------------------------------------------------------
     # Internal
@@ -220,47 +257,51 @@ class AudioPipeline:
     def _derive_events(self, result: AnalysisResult) -> list[AuralEvent]:
         """Detect state transitions and surface them as AuralEvents."""
         events: list[AuralEvent] = []
+        src = result.source_id
 
-        # Environment change
+        # Environment change (tracked per source)
         env_now = result.environment.dominant if result.environment else None
-        if env_now is not None and env_now != self._prev_env:
+        prev_env = self._prev_env_by_source.get(src)
+        if env_now is not None and env_now != prev_env:
             events.append(
                 AuralEvent(
                     event_type=AuralEventType.ENVIRONMENT_CHANGE,
-                    source_id=result.source_id,
+                    source_id=src,
                     description=f"Environment changed to '{env_now.value}'",
-                    payload={"previous": self._prev_env, "current": env_now},
+                    payload={"previous": prev_env, "current": env_now},
                 )
             )
-            self._prev_env = env_now
+            self._prev_env_by_source[src] = env_now
 
-        # Speech transitions
+        # Speech transitions (tracked per source)
         speech_now = result.speech is not None and bool(result.speech.text.strip())
-        if speech_now and not self._prev_speech_active:
+        prev_speech = self._prev_speech_active_by_source.get(src, False)
+        if speech_now and not prev_speech:
             events.append(
                 AuralEvent(
                     event_type=AuralEventType.SPEECH_STARTED,
-                    source_id=result.source_id,
+                    source_id=src,
                     description="Speech detected",
                 )
             )
-        elif not speech_now and self._prev_speech_active:
+        elif not speech_now and prev_speech:
             events.append(
                 AuralEvent(
                     event_type=AuralEventType.SPEECH_ENDED,
-                    source_id=result.source_id,
+                    source_id=src,
                     description="Speech ended",
                 )
             )
-        self._prev_speech_active = speech_now
+        self._prev_speech_active_by_source[src] = speech_now
 
-        # Music transitions
+        # Music transitions (tracked per source)
         music_now = result.music is not None and result.music.is_music
-        if music_now and not self._prev_music_active:
+        prev_music = self._prev_music_active_by_source.get(src, False)
+        if music_now and not prev_music:
             events.append(
                 AuralEvent(
                     event_type=AuralEventType.MUSIC_STARTED,
-                    source_id=result.source_id,
+                    source_id=src,
                     description="Music detected",
                     payload={
                         "tempo_bpm": result.music.tempo_bpm if result.music else None,
@@ -268,22 +309,22 @@ class AudioPipeline:
                     },
                 )
             )
-        elif not music_now and self._prev_music_active:
+        elif not music_now and prev_music:
             events.append(
                 AuralEvent(
                     event_type=AuralEventType.MUSIC_ENDED,
-                    source_id=result.source_id,
+                    source_id=src,
                     description="Music ended",
                 )
             )
-        self._prev_music_active = music_now
+        self._prev_music_active_by_source[src] = music_now
 
         # Alarm detection
         if env_now == EnvironmentLabel.ALARM:
             events.append(
                 AuralEvent(
                     event_type=AuralEventType.ALARM_DETECTED,
-                    source_id=result.source_id,
+                    source_id=src,
                     description="Alarm sound detected",
                     severity=0.9,
                 )
@@ -307,7 +348,7 @@ def _chunk_id(chunk: AudioChunk) -> str:
 
 def _merge_partial(result: AnalysisResult, partial: Any) -> None:
     """Merge a partial analyser result into the composite AnalysisResult."""
-    from ai_ear.analyzers.base import SpeechResult, EmotionResult, EnvironmentResult, MusicResult
+    from ai_ear.analyzers.base import EmotionResult, EnvironmentResult, MusicResult, SpeechResult
 
     if isinstance(partial, SpeechResult):
         result.speech = partial.segment

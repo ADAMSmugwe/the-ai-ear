@@ -6,15 +6,12 @@ Uses httpx.AsyncClient with TestClient transport for fast in-process testing.
 
 from __future__ import annotations
 
-import asyncio
 import io
-import struct
 import time
 
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
 
 from ai_ear.api.server import create_app
 from ai_ear.core.config import Settings

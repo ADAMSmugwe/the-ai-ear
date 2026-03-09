@@ -23,9 +23,9 @@ from ai_ear.analyzers.base import BaseAnalyzer, EnvironmentResult
 from ai_ear.core.models import AudioChunk, EnvironmentLabel, EnvironmentSnapshot
 from ai_ear.utils.audio import (
     rms_db,
-    zero_crossing_rate,
     spectral_centroid_hz,
     spectral_flatness,
+    zero_crossing_rate,
 )
 
 log = logging.getLogger(__name__)
@@ -52,15 +52,25 @@ class EnvironmentAnalyzer(BaseAnalyzer):
     ) -> None:
         self._sample_rate = sample_rate
         self._noise_gate_db = noise_gate_db
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="env")
+        self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="env"
+        )
 
     async def load(self) -> None:
+        # Recreate the executor if it was previously shut down.
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="env")
         log.debug("EnvironmentAnalyzer ready (heuristic mode)")
 
     async def unload(self) -> None:
-        self._executor.shutdown(wait=False)
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
 
     async def analyse(self, chunk: AudioChunk) -> EnvironmentResult:
+        # Recreate executor if unload() was called previously.
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="env")
         loop = asyncio.get_running_loop()
         snapshot = await loop.run_in_executor(
             self._executor, self._classify_sync, chunk.samples, chunk.sample_rate

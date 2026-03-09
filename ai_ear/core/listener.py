@@ -18,11 +18,10 @@ via ``loop.call_soon_threadsafe`` so the rest of the system stays fully async.
 from __future__ import annotations
 
 import asyncio
-import time
-import uuid
 import logging
+import time
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
 import numpy as np
 
@@ -201,7 +200,24 @@ class AudioListener:
                 source_id=self.source_id,
             )
             if self._loop is not None:
-                self._loop.call_soon_threadsafe(self._queue.put_nowait, chunk)
+                self._loop.call_soon_threadsafe(self._enqueue_chunk, chunk)
+
+
+    def _enqueue_chunk(self, chunk: AudioChunk) -> None:
+        """
+        Called in the asyncio event loop thread (via call_soon_threadsafe).
+
+        Drops the chunk and logs a warning if the queue is full, rather than
+        raising QueueFull which would propagate as an unhandled exception.
+        """
+        try:
+            self._queue.put_nowait(chunk)
+        except asyncio.QueueFull:
+            log.warning(
+                "AudioListener queue full (maxsize=%d) – dropping chunk from '%s'",
+                self._queue.maxsize,
+                self.source_id,
+            )
 
 
 # ---------------------------------------------------------------------------
