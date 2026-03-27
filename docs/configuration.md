@@ -18,8 +18,8 @@ All settings can be overridden via environment variables prefixed with `AIEAR_`.
 | `AIEAR_ENVIRONMENT_ENABLED` | bool | `true` | Enable environment classification |
 | `AIEAR_ENVIRONMENT_NOISE_GATE_DB` | float | `-50.0` | Frames below this dBFS level are classified as silence |
 | `AIEAR_MEMORY_MAX_RESULTS` | int | `500` | Rolling buffer size for analysis results |
-| `AIEAR_MEMORY_MAX_EVENTS` | int | `200` | Rolling buffer size for aural events |
-| `AIEAR_MEMORY_CONTEXT_WINDOW_S` | float | `120.0` | Default context window for `context_summary()` |
+| `AIEAR_MEMORY_MAX_EVENTS` | int | `1000` | Rolling buffer size for aural events |
+| `AIEAR_MEMORY_CONTEXT_WINDOW_S` | float | `60.0` | Default context window for `context_summary()` |
 | `AIEAR_API_HOST` | string | `"0.0.0.0"` | API server listen host |
 | `AIEAR_API_PORT` | int | `8080` | API server listen port |
 | `AIEAR_API_WORKERS` | int | `1` | Number of uvicorn worker processes |

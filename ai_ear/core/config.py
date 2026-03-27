@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ API
     api_host: str = Field(default="0.0.0.0", description="API server bind host")
     api_port: int = Field(default=8080, ge=1, le=65535, description="API server bind port")
+    api_workers: int = Field(default=1, ge=1, description="Number of uvicorn worker processes")
     api_cors_origins: list[str] = Field(
         default=["*"], description="Allowed CORS origins"
     )
