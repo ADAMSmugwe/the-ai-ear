@@ -32,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
             app,
             host=args.host,
             port=args.port,
+            workers=settings.api_workers,
             reload=args.reload,
             log_level="info",
         )
