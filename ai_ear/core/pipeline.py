@@ -34,6 +34,7 @@ from ai_ear.core.models import (
     AudioChunk,
     AuralEvent,
     AuralEventType,
+    EmotionLabel,
     EnvironmentLabel,
 )
 
@@ -82,6 +83,7 @@ class AudioPipeline:
         self._prev_env_by_source: dict[str, EnvironmentLabel | None] = {}
         self._prev_music_active_by_source: dict[str, bool] = {}
         self._prev_speech_active_by_source: dict[str, bool] = {}
+        self._prev_emotion_by_source: dict[str, EmotionLabel | None] = {}
 
     # ------------------------------------------------------------------
     # Analyser registration
@@ -329,6 +331,21 @@ class AudioPipeline:
                     severity=0.9,
                 )
             )
+
+        # Emotion shift (tracked per source)
+        emotion_now = result.emotion.dominant if result.emotion else None
+        prev_emotion = self._prev_emotion_by_source.get(src)
+        if emotion_now is not None and emotion_now != prev_emotion:
+            events.append(
+                AuralEvent(
+                    event_type=AuralEventType.EMOTION_SHIFT,
+                    source_id=src,
+                    description=f"Emotion shifted to '{emotion_now.value}'",
+                    payload={"previous": prev_emotion, "current": emotion_now},
+                    severity=result.emotion.arousal if result.emotion else 0.0,
+                )
+            )
+        self._prev_emotion_by_source[src] = emotion_now
 
         return events
 
